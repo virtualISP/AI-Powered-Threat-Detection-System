@@ -1,0 +1,15 @@
+filebeat.inputs:
+- type: filestream
+  paths:
+    - /var/log/nginx/access.log   # Change to your log path
+  fields:
+    source: "nginx"
+
+output.logstash:
+  hosts: ["logstash:5044"]
+
+logging.level: debug
+
+processors:
+  - add_host_metadata: ~
+  - add_cloud_metadata: ~

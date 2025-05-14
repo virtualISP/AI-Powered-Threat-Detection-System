@@ -1,0 +1,10 @@
+FROM ubuntu:22.04
+
+RUN apt-get update && \
+    apt-get install -y curl gnupg ca-certificates && \
+    curl -fsSL https://ollama.com/install.sh | bash
+
+EXPOSE 11434
+
+CMD /bin/bash -c "/usr/local/bin/ollama serve & sleep 10 && /usr/local/bin/ollama pull phi3:mini && wait"
+

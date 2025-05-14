@@ -1,0 +1,126 @@
+version: '3.8'
+
+services:
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.12.0
+    container_name: filebeat
+    volumes:
+      - ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml
+      - /var/log/nginx:/var/log/nginx:ro
+      - /var/log/nginx/access.log:/var/log/nginx/access.log:ro
+    healthcheck:
+
+      disable: true
+    networks:
+      - backend
+    depends_on:
+      logstash:
+        condition: service_healthy
+  elasticsearch:
+    image: elasticsearch:8.12.0
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms2g -Xmx2g
+      - cluster.routing.allocation.disk.threshold_enabled=false
+    volumes:
+      - ./elasticsearch/config/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml
+      - es_data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=120s || exit 1"]
+      interval: 10s
+      timeout: 120s
+      retries: 10
+
+  logstash:
+    image: logstash:8.12.0
+    container_name: logstash
+    volumes:
+      - ./logstash/pipeline:/usr/share/logstash/pipeline:ro
+      - logstash_data:/usr/share/logstash/data
+      - ./logstash/pipeline/logstash.conf:/usr/share/logstash/pipeline/logstash.conf
+    environment:
+      - LS_PATH_DATA=/usr/share/logstash/data 
+    ports:
+      - "5044:5044"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9600 || exit 1"]
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+  kibana:
+    image: kibana:8.12.0
+    container_name: kibana
+    volumes:
+      - ./kibana/config/kibana.yml:/usr/share/kibana/config/kibana.yml
+    ports:
+      - "5601:5601"
+    networks:
+      - backend
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_REQUEST_TIMEOUT=120000
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+  ollama-analyzer:
+    image: python:3.9
+    container_name: ollama-analyzer
+    volumes:
+      - ./ollama-analyzer:/app
+    working_dir: /app
+    command: >
+      sh -c "pip install -r requirements.txt && python analyzer.py; sleep infinity"
+    environment:
+      - ELASTICSEARCH_HOST=http://elasticsearch:9200
+      - OLLAMA_HOST=http://ollama:11434
+    depends_on:
+      ollama:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - backend
+
+    restart: unless-stopped
+
+
+  ollama:
+    build:
+      context: .
+      dockerfile: Dockerfile.ollama
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    networks:
+      - backend
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 10s
+      retries: 10
+      timeout: 5s
+      start_period: 30s
+
+networks:
+  backend:
+    driver: bridge
+
+
+volumes:
+  es_data:
+  ollama_data:
+  logstash_data:
